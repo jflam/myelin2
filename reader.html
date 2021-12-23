@@ -2,9 +2,15 @@
     <head>
         <title>myreadability</title>
         <script src="reader.js"></script>
+        <link rel="stylesheet" href="reader.css">
     </head>
     <body>
-        <h1>Web page converted to text</h1>
-        <div id="readability" style="font-family: Consolas; font-size: 1.5em"></div>
+        <div class="container">
+            <a id="domain" class="domain reader-domain"></a>
+            <h1 id="title" class="reader-title"></h1>
+            <div class="content">
+                <div id="readability" class="moz-reader-content"></div>
+            </div>
+        </div>
     </body>
 </html>
