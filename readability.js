@@ -1,9 +1,17 @@
 
-// Chrome extension modifications to setup an event listener
+// Chrome extension modifications to setup an event listener This script will
+// be injected into every page loaded into the browser. It lies dormant until
+// it is called by the extension at which point it invokes Readability() on
+// the page DOM and returns the results to the extension. The results include
+// the full set of parsed data returned from readability including the plain
+// text of the page and the simplified HTML.
 
 chrome.runtime.onMessage.addListener(
     function(request, sender, sendResponse) {
         if (request.command === "readable") {
+            // Readability operates by _mutating_ the DOM so we make a copy
+            // of the DOM first to avoid messing up the original page which
+            // is still visible to the user
             let documentClone = document.cloneNode(true);
             let result = new Readability(documentClone).parse();
             sendResponse({ readable: result });

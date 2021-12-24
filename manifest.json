@@ -13,7 +13,10 @@
             "js": ["readability.js"]
         }
     ],
-    "permissions": [ "activeTab", "scripting" ],
+    "permissions": [ 
+        "activeTab", 
+        "scripting"
+    ],
     "action": {
         "default_icon": {
             "16": "/images/get_started16.png",
