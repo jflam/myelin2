@@ -16,14 +16,14 @@ chrome.runtime.onMessage.addListener(
             // Request will be a cross-origin request. Details can be found:
             // https://developer.chrome.com/docs/extensions/mv2/xhr/
             // Need to add localhost to the manifest "permissions" key
-            // let xhr = new XMLHttpRequest();
-            // xhr.open("POST", "http://localhost:8888/");
-            // xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
-            // xhr.send(JSON.stringify(
-            // { 
-            //     "title": request.title, 
-            //     "text": request.textContent 
-            // }));
+            let xhr = new XMLHttpRequest();
+            xhr.open("POST", "http://localhost:8888/");
+            xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
+            xhr.send(JSON.stringify(
+            { 
+                "title": request.title, 
+                "text": request.textContent 
+            }));
         }
     }
 )
