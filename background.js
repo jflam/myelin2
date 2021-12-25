@@ -34,7 +34,8 @@ chrome.action.onClicked.addListener(async function (tab) {
             // Normalize to standard ASCII quote characters
             let splitFix = response.readable.textContent
                 .replace(/[\u2018\u2019]/g, "'")
-                .replace(/[\u201C\u201D]/g, '"');
+                .replace(/[\u201C\u201D]/g, '"')
+                .replace(/\.([a-zA-Z])/g, ". $1");
 
             // Once the page is created in the tab, we send a message to 
             // an event listener on the page with the content to be rendered

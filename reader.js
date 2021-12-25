@@ -21,6 +21,12 @@ window.addEventListener("load", (event) => {
         }
     })
 
+    // TODO: I've come to realize that we should probably be putting the
+    // summary into a <TEXTAREA> and letting the user edit it before adding it
+    // and the generated text into the corpus. The auto-generated 5 sentences
+    // is OK, but there are likely better ones too. From a UX POV it would
+    // also be nice to highlight all the summarized sentences in the original
+    // text.
     document.getElementById("summarize").addEventListener("click", function() {
         if (doc !== null) {
             let xhr = new XMLHttpRequest();
