@@ -28,7 +28,11 @@ if not os.path.exists(DATABASE_NAME):
 # use huggingface + a vector database for the querying operations in the
 # initial version
 
-# ADD - add a new document to the corpus (returns an key)
+# ADD - add a new document to the corpus and returns the result of summarizing
+# the document.
+
+# SUMMARIZE - compute the summary of a document in cases where we don't want
+# to add the document to the corpus as well
 
 # GET - retrieve an existing document from the corpus (using key from ADD or
 # more general retrieval, e.g., by URI)
@@ -55,9 +59,9 @@ if not os.path.exists(DATABASE_NAME):
 # time spent training the tagging model would be repaid by good tagging
 # results in the future. There is a lot of prior art in NLP + tagging space.
 
-@app.route("/", methods=["POST"])
+@app.route("/add", methods=["POST"])
 @cross_origin()
-def index():
+def add():
     json_data = request.json
     with closing(sqlite3.connect(DATABASE_NAME)) as conn:
         with closing(conn.cursor()) as cur:

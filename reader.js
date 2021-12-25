@@ -17,7 +17,7 @@ chrome.runtime.onMessage.addListener(
             // https://developer.chrome.com/docs/extensions/mv2/xhr/
             // Need to add localhost to the manifest "permissions" key
             let xhr = new XMLHttpRequest();
-            xhr.open("POST", "http://localhost:8888/");
+            xhr.open("POST", "http://localhost:8888/add");
             xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
             xhr.send(JSON.stringify(
             { 
