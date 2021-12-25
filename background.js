@@ -31,12 +31,17 @@ chrome.action.onClicked.addListener(async function (tab) {
         });
         chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 
+            // Normalize to standard ASCII quote characters
+            let splitFix = response.readable.textContent
+                .replace(/[\u2018\u2019]/g, "'")
+                .replace(/[\u201C\u201D]/g, '"');
+
             // Once the page is created in the tab, we send a message to 
             // an event listener on the page with the content to be rendered
             chrome.tabs.sendMessage(tab.id, 
             { 
                 "content": response.readable.content,
-                "textContent": response.readable.textContent,
+                "textContent": splitFix,
                 "title": response.readable.title,
                 "siteName": response.readable.siteName,
                 "uri": t.url
