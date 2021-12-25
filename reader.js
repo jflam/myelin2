@@ -21,8 +21,11 @@ chrome.runtime.onMessage.addListener(
             xhr.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
             xhr.send(JSON.stringify(
             { 
+                "uri": request.uri,
                 "title": request.title, 
-                "text": request.textContent 
+                "text": request.textContent,
+                "markup": request.content,
+                "markup_type": "html"
             }));
         }
     }

@@ -1,10 +1,25 @@
-import sys
+import os, sqlite3, sys
+
+from contextlib import closing
 from flask import Flask, request
 from flask_cors import CORS, cross_origin
 
 app = Flask(__name__)
 cors = CORS(app)
 app.config['CORS_HEADERS'] = 'Content-Type'
+
+DATABASE_NAME = "myelin.db"
+
+# Create database if it doesn't exist already
+if not os.path.exists(DATABASE_NAME):
+    with closing(sqlite3.connect(DATABASE_NAME)) as conn:
+        with closing(conn.cursor()) as cur:
+            cur.execute("CREATE TABLE resources (uri TEXT, "
+                "title TEXT, text TEXT NOT NULL, markup TEXT NOT NULL, "
+                "markup_type TEXT)")
+
+# I need a table that contains all the entries. It has the following schema
+# - 
 
 # I want to create an abstract interface for managing and searching over the
 # document collection. Ideally there are verbs that exist and different
@@ -40,19 +55,22 @@ app.config['CORS_HEADERS'] = 'Content-Type'
 # time spent training the tagging model would be repaid by good tagging
 # results in the future. There is a lot of prior art in NLP + tagging space.
 
-
 @app.route("/", methods=["POST"])
 @cross_origin()
 def index():
     json_data = request.json
-    print(f"input {json_data}", file=sys.stderr)
-    title = json_data['title']
-    text = json_data['text']
-    result = {
-        "title": title,
-        "length": len(text)
-    }
-    print(f"RESULT: {result}", file=sys.stderr)
-    return result
+    with closing(sqlite3.connect(DATABASE_NAME)) as conn:
+        with closing(conn.cursor()) as cur:
+            cur.execute("INSERT INTO resources(uri, title, text, markup, "
+                "markup_type) VALUES (?, ?, ?, ?, ?)", (
+                    json_data["uri"], 
+                    json_data["title"],
+                    json_data["text"],
+                    json_data["markup"],
+                    json_data["markup_type"]
+            ))
+            conn.commit()
+    print(f"INSERTED {json_data['title']} into resources", file=sys.stderr)
+    return { "status": 0 }
 
 app.run(host="127.0.0.1", port=8888)
