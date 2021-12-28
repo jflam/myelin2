@@ -54,6 +54,20 @@ window.addEventListener("load", (event) => {
             console.log("ERROR: doc is not defined on this page");
         }
     })
+
+    document.getElementById("query").addEventListener("click", function() {
+        if (doc !== null) {
+            let xhr = new XMLHttpRequest();
+            xhr.open("POST", "http://localhost:8888/search");
+            xhr.setRequestHeader("Content-Type", 
+                "application/json;charset=UTF-8");
+            xhr.send(JSON.stringify(
+            {
+                "query": "drivetrain approach model assembly line"
+            }
+            ))
+        }
+    })
 })
 
 chrome.runtime.onMessage.addListener(

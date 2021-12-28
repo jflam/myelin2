@@ -1,4 +1,6 @@
+from typing import Any
 import nltk, os, sqlite3, sys, time
+import embeddinghub as eh
 import numpy as np
 
 from contextlib import closing
@@ -13,6 +15,18 @@ app.config['CORS_HEADERS'] = 'Content-Type'
 
 DATABASE_NAME = "myelin.db"
 SENTENCE_TRANSFORMER = "all-MiniLM-L6-v2"
+
+# Tunable parameters based on model used for embedding calculations
+MAX_LENGTH = 384
+STRIDE = 128
+
+# embeddinghub parameters
+EH_HOST = "0.0.0.0"
+EH_PORT = 7462
+EH_SPACE = "kb"
+
+# Maximum number of results to return when querying embeddinghub
+MAX_RESULTS = 5
 
 # Create database if it doesn't exist already
 if not os.path.exists(DATABASE_NAME):
@@ -57,24 +71,112 @@ if not os.path.exists(DATABASE_NAME):
 # ADD - add a new document to the corpus and returns the result of summarizing
 # the document.
 
-@app.route("/add", methods=["POST"])
-@cross_origin()
-def add():
-    """Add a resource to the corpus"""
-    json_data = request.json
+def insert_resource(resource: Any)-> int:
+    """Insert resource into SQLite resource table
+
+    Args:
+        resource (Any): JSON object representing request from client
+
+    Returns:
+        int: rowid of newly inserted row
+    """
+    id = None
     with closing(sqlite3.connect(DATABASE_NAME)) as conn:
         with closing(conn.cursor()) as cur:
             cur.execute("INSERT INTO resources(uri, title, text, markup, "
                 "markup_type) VALUES (?, ?, ?, ?, ?)", (
-                    json_data["uri"], 
-                    json_data["title"],
-                    json_data["text"],
-                    json_data["markup"],
-                    json_data["markup_type"]
+                    resource["uri"], 
+                    resource["title"],
+                    resource["text"],
+                    resource["markup"],
+                    resource["markup_type"]
             ))
+            id = cur.lastrowid
             conn.commit()
-    print(f"INSERTED {json_data['title']} into resources", file=sys.stderr)
+    print(f"INSERTED {resource['title']}, ID {id} into resources", file=sys.stderr)
+    return id
+
+def index_resource(resource: Any, id: int):
+    """Add resource, id to embeddinghub
+
+    Args:
+        resource (Any): JSON object representing request from client        
+        id (int): rowid of resource in SQLite database
+    """
+    model = SentenceTransformer(SENTENCE_TRANSFORMER)
+
+    # Call to tokenizer() will compute N embeddings, each one representing a
+    # chunk of the resource. The STRIDE parameter controls the amount of
+    # token overlap between chunks, and MAX_LENGTH (which is model-dependent)
+    # controls the size of each chunk.
+    tokens = model.tokenizer(
+        text=resource["text"],
+        max_length=MAX_LENGTH,
+        truncation=True,
+        padding=True,
+        return_overflowing_tokens=True,
+        stride=STRIDE
+    )
+
+    chunk_embeddings = []
+    for chunk in tokens["input_ids"]:
+
+        # TODO: update this as decode() will return tokens like [SEP] etc.
+        # which are not needed here. Ideally what we do is use the same 
+        # chunking algorithm used in the model.tokenizer() call above to 
+        # generate the chunks that are encoded vs. going back to a string
+        # first before re-encoding them.
+        chunk_str = model.tokenizer.decode(chunk)
+        chunk_embeddings.append(
+            model.encode(chunk_str, convert_to_tensor=True).cpu())
+
+    # Each chunk embedding must map to the same resource id
+    hub = eh.connect(eh.Config(host=EH_HOST, port=EH_PORT))
+    space = hub.get_space(EH_SPACE)
+    for chunk_embedding in chunk_embeddings:
+        space.set(id, chunk_embedding)
+
+@app.route("/add", methods=["POST"])
+@cross_origin()
+def add():
+    """Add a resource to the corpus"""
+    id = insert_resource(request.json)
+    index_resource(request.json, id)
     return { "status": 0 }
+
+@app.route("/search", methods=["POST"])
+@cross_origin()
+def search():
+    query = request.json["query"]
+    model = SentenceTransformer(SENTENCE_TRANSFORMER)
+    embedding = model.encode(query, convert_to_tensor=True).cpu()
+
+    # TODO: remove this workaround once embeddinghub fixes this bug
+    e = eh.embedding_store_pb2.Embedding()
+    e.values[:] = embedding.tolist()
+
+    hub = eh.connect(eh.Config(host=EH_HOST, port=EH_PORT))
+    space = hub.get_space(EH_SPACE)
+
+    # results contains a list of rowids that need to be fetched from SQLite
+    # to get the actual results
+    rowids = space.nearest_neighbors(MAX_RESULTS, vector=e)
+
+    # Note that result is an id that needs to retrieve actual results from 
+    print(f"QUERY: {query}", file=sys.stderr)
+    for rowid in rowids:
+        # TODO: lookup results in SQLite
+        print(f"rowid {rowid}", file=sys.stderr)
+
+# Two different models for summarization. One is more explicit through the use
+# of the LEXRANK algorithm, the other uses BART or T5 which is explicitly 
+# trained on this task.
+
+def summarize_lexrank():
+    pass
+
+def summarize_bart():
+    pass
 
 # SUMMARIZE - compute the summary of a document in cases where we don't want
 # to add the document to the corpus as well
