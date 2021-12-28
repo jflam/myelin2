@@ -1,0 +1,1 @@
+docker run -d -v server:/root/.embeddinghub/data -p 7462:7462 featureformcom/embeddinghub
