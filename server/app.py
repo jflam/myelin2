@@ -29,6 +29,11 @@ EH_PATH = f"metadata/{EH_SPACE}"
 # Maximum number of results to return when querying embeddinghub
 MAX_RESULTS = 5
 
+# Load the SENTENCE_TRANSFORMER model. This can be changed by changing the
+# constant defined earlier in this file. This one seems to run reasonably
+# well on my RTX 2080, though this is still hardly "fast"
+model = SentenceTransformer(SENTENCE_TRANSFORMER)
+
 def create_sqlite(force: bool=False):
     if force:
         os.remove(DATABASE_NAME)
@@ -122,8 +127,6 @@ def index_resource(resource: Any):
             print(f"INSERTED {resource['title']}, ID {resource_id} INTO resources", 
                 file=sys.stderr)
 
-            model = SentenceTransformer(SENTENCE_TRANSFORMER)
-
             # Call to tokenizer() will compute N embeddings, each one representing a
             # chunk of the resource. The STRIDE parameter controls the amount of
             # token overlap between chunks, and MAX_LENGTH (which is model-dependent)
@@ -170,7 +173,6 @@ def search():
     if "q" in request.args:
         query = request.args["q"]
         print(f"SEARCHING for {query}", file=sys.stderr)
-        model = SentenceTransformer(SENTENCE_TRANSFORMER)
         embedding = model.encode(query, convert_to_tensor=True).cpu()
 
         # TODO: remove this workaround once embeddinghub fixes this bug
@@ -240,10 +242,6 @@ def summarize():
     for i, sentence in enumerate(sentences):
         print(f"{i} {sentence}", file=sys.stderr)
 
-    # Load the SENTENCE_TRANSFORMER model. This can be changed by changing the
-    # constant defined earlier in this file. This one seems to run reasonably
-    # well on my RTX 2080, though this is still hardly "fast"
-    model = SentenceTransformer(SENTENCE_TRANSFORMER)
 
     # Generate vector of embeddings from the previously split sentences
     embeddings = model.encode(sentences, convert_to_tensor=True)
