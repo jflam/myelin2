@@ -1,3 +1,8 @@
+chrome.omnibox.onInputEntered.addListener((text) => {
+    let url = `http://localhost:8888/search?q=${encodeURIComponent(text)}`;
+    chrome.tabs.create({ url: url });
+});
+
 chrome.action.onClicked.addListener(async function (tab) {
     const [t] = await chrome.tabs.query({
         active: true,

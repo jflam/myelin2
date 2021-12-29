@@ -1,5 +1,5 @@
 from typing import Any
-import nltk, os, sqlite3, sys, time
+import nltk, os, shutil, sqlite3, sys, time
 import embeddinghub as eh
 import numpy as np
 
@@ -24,17 +24,48 @@ STRIDE = 128
 EH_HOST = "0.0.0.0"
 EH_PORT = 7462
 EH_SPACE = "kb"
+EH_PATH = f"metadata/{EH_SPACE}"
 
 # Maximum number of results to return when querying embeddinghub
 MAX_RESULTS = 5
 
-# Create database if it doesn't exist already
-if not os.path.exists(DATABASE_NAME):
+def create_sqlite(force: bool=False):
+    if force:
+        os.remove(DATABASE_NAME)
+
+    print(f"CREATING SQLite database #{DATABASE_NAME}", file=sys.stderr)
     with closing(sqlite3.connect(DATABASE_NAME)) as conn:
         with closing(conn.cursor()) as cur:
-            cur.execute("CREATE TABLE resources (uri TEXT, "
-                "title TEXT, text TEXT NOT NULL, markup TEXT NOT NULL, "
-                "markup_type TEXT)")
+            cur.execute("""
+CREATE TABLE resources (uri TEXT, title TEXT, markup TEXT, markup_type TEXT)
+""")
+            cur.execute("""
+CREATE TABLE chunks (text TEXT, resource_id INTEGER NOT NULL)
+""")
+
+def create_embeddinghub(force: bool=False):
+    if force and os.path.exists(EH_PATH):
+        shutil.rmtree(EH_PATH)
+
+    print(f"CREATING embeddinghub space #{EH_SPACE}", file=sys.stderr)
+    hub = eh.connect(eh.Config(host=EH_HOST, port=EH_PORT))
+    hub.create_space(EH_SPACE, dims=MAX_LENGTH)
+
+def create_databases(force: bool=False):
+    """Create SQLite and embeddinghub databases for use by the indexer"""
+
+    # Create SQLite database if it doesn't exist already
+    # Two tables, and a join is needed to retrieve search results
+    # - resources which contains the HTML of the resource
+    # - embedding which contains the chunk and a link to the resource
+    if force:
+        create_sqlite(force)
+        create_embeddinghub(force)
+    else:
+        if not os.path.exists(DATABASE_NAME):
+            create_sqlite()
+        if not os.path.exists(EH_PATH):
+            create_embeddinghub()
 
 # I want to create an abstract interface for managing and searching over the
 # document collection. Ideally there are verbs that exist and different
@@ -71,102 +102,110 @@ if not os.path.exists(DATABASE_NAME):
 # ADD - add a new document to the corpus and returns the result of summarizing
 # the document.
 
-def insert_resource(resource: Any)-> int:
-    """Insert resource into SQLite resource table
+def index_resource(resource: Any):
+    """Add resource to SQLite and embeddinghub 
 
     Args:
-        resource (Any): JSON object representing request from client
-
-    Returns:
-        int: rowid of newly inserted row
+        resource (Any): JSON object representing request from client        
     """
     id = None
     with closing(sqlite3.connect(DATABASE_NAME)) as conn:
         with closing(conn.cursor()) as cur:
-            cur.execute("INSERT INTO resources(uri, title, text, markup, "
-                "markup_type) VALUES (?, ?, ?, ?, ?)", (
+            cur.execute("INSERT INTO resources(uri, title, markup, "
+                "markup_type) VALUES (?, ?, ?, ?)", (
                     resource["uri"], 
                     resource["title"],
-                    resource["text"],
                     resource["markup"],
                     resource["markup_type"]
             ))
-            id = cur.lastrowid
+            resource_id = cur.lastrowid
+            print(f"INSERTED {resource['title']}, ID {resource_id} INTO resources", 
+                file=sys.stderr)
+
+            model = SentenceTransformer(SENTENCE_TRANSFORMER)
+
+            # Call to tokenizer() will compute N embeddings, each one representing a
+            # chunk of the resource. The STRIDE parameter controls the amount of
+            # token overlap between chunks, and MAX_LENGTH (which is model-dependent)
+            # controls the size of each chunk.
+            tokens = model.tokenizer(
+                text=resource["text"],
+                max_length=MAX_LENGTH,
+                truncation=True,
+                padding=True,
+                return_overflowing_tokens=True,
+                stride=STRIDE
+            )
+
+            hub = eh.connect(eh.Config(host=EH_HOST, port=EH_PORT))
+            space = hub.get_space(EH_SPACE)
+            for chunk in tokens["input_ids"]:
+
+                # TODO: update this as decode() will return tokens like [SEP] etc.
+                # which are not needed here. Ideally what we do is use the same 
+                # chunking algorithm used in the model.tokenizer() call above to 
+                # generate the chunks that are encoded vs. going back to a string
+                # first before re-encoding them.
+                chunk_str = model.tokenizer.decode(chunk)
+                cur.execute("INSERT INTO chunks(text, resource_id) "
+                    "VALUES (?, ?)", (chunk_str, resource_id))
+                print(f"INSERTED chunk", file=sys.stderr)
+                chunk_id = cur.lastrowid
+                chunk_embedding = model.encode(chunk_str, 
+                    convert_to_tensor=True).cpu()
+                space.set(chunk_id, chunk_embedding)
+
             conn.commit()
-    print(f"INSERTED {resource['title']}, ID {id} into resources", file=sys.stderr)
-    return id
-
-def index_resource(resource: Any, id: int):
-    """Add resource, id to embeddinghub
-
-    Args:
-        resource (Any): JSON object representing request from client        
-        id (int): rowid of resource in SQLite database
-    """
-    model = SentenceTransformer(SENTENCE_TRANSFORMER)
-
-    # Call to tokenizer() will compute N embeddings, each one representing a
-    # chunk of the resource. The STRIDE parameter controls the amount of
-    # token overlap between chunks, and MAX_LENGTH (which is model-dependent)
-    # controls the size of each chunk.
-    tokens = model.tokenizer(
-        text=resource["text"],
-        max_length=MAX_LENGTH,
-        truncation=True,
-        padding=True,
-        return_overflowing_tokens=True,
-        stride=STRIDE
-    )
-
-    chunk_embeddings = []
-    for chunk in tokens["input_ids"]:
-
-        # TODO: update this as decode() will return tokens like [SEP] etc.
-        # which are not needed here. Ideally what we do is use the same 
-        # chunking algorithm used in the model.tokenizer() call above to 
-        # generate the chunks that are encoded vs. going back to a string
-        # first before re-encoding them.
-        chunk_str = model.tokenizer.decode(chunk)
-        chunk_embeddings.append(
-            model.encode(chunk_str, convert_to_tensor=True).cpu())
-
-    # Each chunk embedding must map to the same resource id
-    hub = eh.connect(eh.Config(host=EH_HOST, port=EH_PORT))
-    space = hub.get_space(EH_SPACE)
-    for chunk_embedding in chunk_embeddings:
-        space.set(id, chunk_embedding)
 
 @app.route("/add", methods=["POST"])
 @cross_origin()
 def add():
     """Add a resource to the corpus"""
-    id = insert_resource(request.json)
-    index_resource(request.json, id)
+    index_resource(request.json)
     return { "status": 0 }
 
-@app.route("/search", methods=["POST"])
+@app.route("/search", methods=['GET'])
 @cross_origin()
 def search():
-    query = request.json["query"]
-    model = SentenceTransformer(SENTENCE_TRANSFORMER)
-    embedding = model.encode(query, convert_to_tensor=True).cpu()
+    if "q" in request.args:
+        query = request.args["q"]
+        print(f"SEARCHING for {query}", file=sys.stderr)
+        model = SentenceTransformer(SENTENCE_TRANSFORMER)
+        embedding = model.encode(query, convert_to_tensor=True).cpu()
 
-    # TODO: remove this workaround once embeddinghub fixes this bug
-    e = eh.embedding_store_pb2.Embedding()
-    e.values[:] = embedding.tolist()
+        # TODO: remove this workaround once embeddinghub fixes this bug
+        e = eh.embedding_store_pb2.Embedding()
+        e.values[:] = embedding.tolist()
 
-    hub = eh.connect(eh.Config(host=EH_HOST, port=EH_PORT))
-    space = hub.get_space(EH_SPACE)
+        hub = eh.connect(eh.Config(host=EH_HOST, port=EH_PORT))
+        space = hub.get_space(EH_SPACE)
 
-    # results contains a list of rowids that need to be fetched from SQLite
-    # to get the actual results
-    rowids = space.nearest_neighbors(MAX_RESULTS, vector=e)
+        # results contains a list of rowids that need to be fetched from SQLite
+        # to get the actual results
+        rowids = space.nearest_neighbors(MAX_RESULTS, vector=e)
+        print(f"RESULTS: {rowids}", file=sys.stderr)
 
-    # Note that result is an id that needs to retrieve actual results from 
-    print(f"QUERY: {query}", file=sys.stderr)
-    for rowid in rowids:
-        # TODO: lookup results in SQLite
-        print(f"rowid {rowid}", file=sys.stderr)
+        search_results = []
+        seq = ",".join(['?'] * len(rowids))
+        sql = f"""
+SELECT resources.rowid, resources.title, resources.uri, resources.markup, 
+    resources.markup_type, chunks.text
+FROM resources 
+INNER JOIN chunks ON chunks.resource_id = resources.rowid
+WHERE chunks.rowid IN ({seq})
+"""
+        print(f"SQL: {sql}, rowids {rowids}")
+        with closing(sqlite3.connect(DATABASE_NAME)) as conn:
+            with closing(conn.cursor()) as cur:
+                results = cur.execute(sql, rowids[:MAX_RESULTS])
+                for result in results:
+                    search_result = f"""
+<a href='{result[2]}'>{result[1]}</a>
+<div>{result[5]}</div>
+                    """
+                    search_results.append(search_result)
+
+        return f"<html><body>{''.join(search_results)}</body></html>"
 
 # Two different models for summarization. One is more explicit through the use
 # of the LEXRANK algorithm, the other uses BART or T5 which is explicitly 
@@ -234,4 +273,5 @@ def summarize():
         "compute_time_seconds": f"{elapsed_time:.2f}"
     }
 
+create_databases()
 app.run(host="127.0.0.1", port=8888)
