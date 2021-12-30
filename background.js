@@ -1,55 +1,56 @@
+// Initiate search when user presses ENTER on the omnibox and myelin is the
+// selected search engine
 chrome.omnibox.onInputEntered.addListener((text) => {
     let url = `http://localhost:8888/search?q=${encodeURIComponent(text)}`;
     chrome.tabs.create({ url: url });
 });
 
+// User clicked on the add page to myelin button
 chrome.action.onClicked.addListener(async function (tab) {
     const [t] = await chrome.tabs.query({
         active: true,
         currentWindow: true
     });
 
-    // When a web page is loaded into a tab in the browser, we inject the
-    // readability.js file into the page and start a message handler that
-    // listens for incoming messages.
+    // When the user clicks on the add page to myelin button in the browser
+    // toolbar, we inject the readability.js file into the page and register a
+    // message handler that listens for the response from the readability.js
+    // script that generates the readable form of the page and passes us a
+    // parameter that contains the parsed content.
 
-    // Here, we send a command message to that handler asking it to parse
-    // the contents of the page and return to us a struct that contains the
-    // parsed contents of the page. There are several pieces of information
-    // that are returned: the title, the text content (with no markup) of
-    // the page that is suitable for indexing, the simplified HTML content
-    // of the page that is suitable for rendering, the finally the name and
-    // uri of the site.
-    chrome.tabs.sendMessage(t.id, { command: "readable" }, (response) => {
+    // Dynamically inject the reader.js page into the newly created tab
+    chrome.scripting.executeScript({
+        target: { tabId: t.id },
+        files: [ 'readability.js' ]
+    });
 
-        // Using the information returned from the readability.js script 
-        // injected in the page, construct a new web page using the template
-        // in reader.html. This will be rendered as an extension UI with
-        // the URI extension://{id}/reader.html, and will contain the 
-        // primary UI that the user will use to interact with the page.
+    // Register the event handler that receives the computed results from
+    // readability in the content page
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
-        // TODO: invoke DOMpurify over the page to ensure that we sanitize
-        // the results before displaying them in the reader.html context.
-
+        // Create a new tab for the reader.html page
         chrome.tabs.create({ 
             url: chrome.runtime.getURL("reader.html")
         });
+
+        // Register a listener for the updated event that will tell us if 
+        // when the newly created reader.html tab has completed initializing.
         chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 
             // Normalize to standard ASCII quote characters
-            let splitFix = response.readable.textContent
+            let splitFix = request.readable.textContent
                 .replace(/[\u2018\u2019]/g, "'")
                 .replace(/[\u201C\u201D]/g, '"')
                 .replace(/\.([a-zA-Z])/g, ". $1");
 
             // Once the page is created in the tab, we send a message to 
-            // an event listener on the page with the content to be rendered
+            // an event listener on reader.html with the content to be rendered
             chrome.tabs.sendMessage(tab.id, 
             { 
-                "content": response.readable.content,
+                "content": request.readable.content,
                 "textContent": splitFix,
-                "title": response.readable.title,
-                "siteName": response.readable.siteName,
+                "title": request.readable.title,
+                "siteName": request.readable.siteName,
                 "uri": t.url
             })
         });

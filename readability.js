@@ -6,18 +6,25 @@
 // the full set of parsed data returned from readability including the plain
 // text of the page and the simplified HTML.
 
-chrome.runtime.onMessage.addListener(
-    function(request, sender, sendResponse) {
-        if (request.command === "readable") {
-            // Readability operates by _mutating_ the DOM so we make a copy
-            // of the DOM first to avoid messing up the original page which
-            // is still visible to the user
-            let documentClone = document.cloneNode(true);
-            let result = new Readability(documentClone).parse();
-            sendResponse({ readable: result });
-        }
-    }
-)
+// This script is injected into the page, based on a user clicking on the 
+// button in the toolbar. The page may or may not have completed loading by
+// the time they click on it. I think that for now it makes sense to wrap
+// the call to invoke readability in a document.onready() event handler.
+
+function documentReady(fn) {
+  if (document.readyState === "complete" || 
+    document.readyState === "interactive") {
+    setTimeout(fn, 1);
+  } else {
+    document.addEventListener("DOMContentLoaded", fn);
+  }
+}
+
+documentReady(() => {
+  let documentClone = document.cloneNode(true);
+  let result = new Readability(documentClone).parse();
+  chrome.runtime.sendMessage({ readable: result });
+});
 
 /*eslint-env es6:false*/
 /*
