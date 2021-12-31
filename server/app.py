@@ -200,12 +200,18 @@ WHERE chunks.rowid IN ({seq})
         with closing(sqlite3.connect(DATABASE_NAME)) as conn:
             with closing(conn.cursor()) as cur:
                 results = cur.execute(sql, rowids[:MAX_RESULTS])
+        
+                # De-dupe the results and show only the first result (the
+                # results are sorted by )
+                current_rowid = -1 
                 for result in results:
-                    search_result = f"""
+                    if result[0] != current_rowid:
+                        current_rowid = result[0]
+                        search_result = f"""
 <a href='{result[2]}'>{result[1]}</a>
 <div>{result[5]}</div>
                     """
-                    search_results.append(search_result)
+                        search_results.append(search_result)
 
         return f"<html><body>{''.join(search_results)}</body></html>"
 
